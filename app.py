@@ -1,13 +1,21 @@
 import streamlit as st
 from openai import OpenAI
+import os
 
 st.set_page_config(page_title="L'Expert MarTech", page_icon="🤖")
-
 st.title("🤖 Assistant Expert MarTech")
 
-# --- INITIALISATION DE LA MÉMOIRE (La bibliothèque) ---
+# --- CHARGEMENT DE LA CONNAISSANCE (L'ANTISÈCHE) ---
+# On essaie de lire le fichier texte s'il existe
+try:
+    with open("connaissance.txt", "r", encoding="utf-8") as f:
+        knowledge_base = f.read()
+except FileNotFoundError:
+    knowledge_base = "" # Si le fichier n'existe pas, on met une chaîne vide
+
+# --- INITIALISATION DE LA MÉMOIRE ---
 if "library" not in st.session_state:
-    st.session_state["library"] = [] # Une liste vide pour commencer
+    st.session_state["library"] = []
 
 if "messages" not in st.session_state:
     st.session_state["messages"] = [
@@ -17,6 +25,12 @@ if "messages" not in st.session_state:
 with st.sidebar:
     st.header("Configuration")
     openai_api_key = st.text_input("Clé API OpenAI", type="password")
+    
+    # Petit indicateur pour voir si la connaissance est chargée
+    if knowledge_base:
+        st.success("✅ Base de connaissance chargée")
+    else:
+        st.warning("⚠️ Aucune connaissance spécifique trouvée")
 
 # Affichage discussion
 for msg in st.session_state.messages:
@@ -28,14 +42,28 @@ if prompt := st.chat_input():
         st.error("Veuillez entrer votre clé API.")
         st.stop()
 
-    # 1. On affiche la question utilisateur
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
 
     client = OpenAI(api_key=openai_api_key)
 
-    # 2. On génère la réponse de l'Expert
-    system_prompt = "Tu es un expert MarTech pragmatique. Réponds de façon concise et orientée ROI."
+    # --- INJECTION DU CONTEXTE DANS LE PROMPT ---
+    # C'est ici que la magie opère : on fusionne votre expertise avec celle de GPT
+    system_prompt = f"""
+    Tu es un expert senior en technologies Marketing (MarTech) et Sales.
+    Ton ton est pragmatique, direct et orienté ROI.
+    
+    VOICI DES INFORMATIONS SPÉCIFIQUES ET À JOUR QUE TU DOIS UTILISER :
+    --- DÉBUT DE LA CONNAISSANCE INTERNE ---
+    {knowledge_base}
+    --- FIN DE LA CONNAISSANCE INTERNE ---
+    
+    Règles :
+    1. Si la réponse se trouve dans la "Connaissance Interne", utilise-la en priorité.
+    2. Si tu ne sais pas, dis-le, n'invente pas.
+    3. Recommande des workflows précis.
+    """
+
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "system", "content": system_prompt}] + st.session_state.messages
@@ -45,12 +73,10 @@ if prompt := st.chat_input():
     st.session_state.messages.append({"role": "assistant", "content": msg_content})
     st.chat_message("assistant").write(msg_content)
 
-    # --- NOUVEAU : LA FONCTION "BIBLIOTHÉCAIRE" (En arrière-plan) ---
-    # On demande à l'IA de créer un titre pour ce cas d'usage
+    # --- FONCTION BIBLIOTHÉCAIRE (Cas d'usage) ---
     reformulation_prompt = f"""
     Analyse cette demande utilisateur : "{prompt}".
     Reformule-la en un TITRE de cas d'usage générique (max 10 mots).
-    Exemple : "Automatisation de la relance client via LinkedIn"
     """
     
     summary_response = client.chat.completions.create(
@@ -58,8 +84,4 @@ if prompt := st.chat_input():
         messages=[{"role": "user", "content": reformulation_prompt}]
     )
     cas_usage = summary_response.choices[0].message.content.strip().replace('"', '')
-    
-    # On stocke le résultat dans la mémoire partagée
     st.session_state["library"].append(cas_usage)
-    # On affiche une petite notification discrète
-    st.toast(f"Nouveau cas d'usage identifié : {cas_usage}")
